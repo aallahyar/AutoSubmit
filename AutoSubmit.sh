@@ -1,48 +1,63 @@
 #!/bin/bash
 
-my_netid=<fill in your net id>
-my_script=<fill in your script path and its corresponding parameters>
+# Fill in your script path and its corresponding parameters
+# E.g. my_script=( script.sh 1 2 3 )
+my_script=( )
+# Fill in your script name
+# E.g. my_script_name='script.sh'
+my_script_name=''
+# Fill in the command to check if your work is done
+# E.g. my_script=( test -e output_file )
+my_done_check=( )
+n_req_engines=1
 check_interval=1800
-n_req_engines=40
+sleep_interval=60
 
-printf "You have 10 seconds to choose # of engines [$n_req_engines]: \n"
-read -t 10 tmp_var
-if [ ! -z "$tmp_var" ]
+if [ "${#my_script[@]}" -eq 0 -o -z "$my_script_name" -o "${#my_done_check[@]}" -eq 0 ]
+then
+	echo "Some of the required variables in this file have not been set."
+	echo "Edit this file and provide the input to my_script, my_script_name and my_done_check."
+	exit 1
+fi
+
+read -p "You have 10 seconds to choose # of engines [$n_req_engines]: " -t 10 tmp_var
+if [ -n "$tmp_var" ]
 then
 	n_req_engines=$tmp_var
 fi
 
-epoch=1
-while true
-do
-	printf "| Cycle: $epoch =====[ `date` ]===========================\n"
-	n_running_engines=`squeue -u $my_netid | grep 'short.*Eng.*$my_netid  R' | wc -l`
-	n_all_engines=`squeue -u $my_netid | grep 'short.*Eng.*$my_netid' | wc -l`
+cleanup() {
+  scancel --user="$USER" --name="$my_script_name"
+}
 
-	printf "|--- QInfo: [$n_running_engines running, $n_all_engines submitted, $n_req_engines required] ------- \n"
+trap cleanup INT TERM
+
+epoch=0
+while ! "${my_done_check[@]}"
+do
+	echo "| Cycle: $((++epoch)) =====[ `date` ]==========================="
+	n_running_engines=`squeue --noheader --user="$USER" --name="$my_script_name" --states='COMPLETING,RUNNING,SUSPENDED' | wc -l`
+	n_all_engines=`squeue --noheader --user="$USER" --name="$my_script_name" | wc -l`
+
+	echo "|--- QInfo: [$n_running_engines running, $n_all_engines submitted, $n_req_engines required] -------"
 	if [ $n_all_engines -lt $n_req_engines ]
 	then
-		let "n_new_engines=$n_req_engines-$n_all_engines"
-		printf "Requesting [$n_new_engines] more engines...\n"
-		for i in $(seq 1 $req_engines)
+		echo "Requesting [$((n_req_engines-n_all_engines))] more engines..."
+		for ((i=n_all_engines; i<n_req_engines; i++))
 		do 
-			sbatch $my_script
+			sbatch "${my_script[@]}"
 		done
 	fi
-	old_time=$(date +"%s")
-	while true
+	for ((i=0; i<check_interval; i+=sleep_interval))
 	do
-		cur_time=$(date +"%s")
-		if [ $(($cur_time - $old_time)) -gt $check_interval ]
-		then
-			break
-		fi
-		n_running_engines=`squeue -u $my_netid | grep 'short.*Eng.*$my_netid  R' | wc -l`
-		echo "There are [$n_running_engines] jobs running in the queue. [$(($old_time + $check_interval - $cur_time))] seconds remaining until next check."
-		sleep 60
+		n_running_engines=`squeue --noheader --user="$USER" --name="$my_scriptname" --states='COMPLETING,RUNNING,SUSPENDED' | wc -l`
+		echo "There are [$n_running_engines] jobs running in the queue. [$((check_interval-i))] seconds remaining until next check."
+		sleep "$sleep_interval"
 	done
 
-	printf "Waited [$check_interval] seconds, performing job check ...\n"
-	printf "|---------------------- End of cycle [$epoch] -------------------------\n\n\n\n\n"
-	let "epoch++"
+	echo "Waited [$check_interval] seconds, performing job check ..."
+	echo -e "|---------------------- End of cycle [$epoch] -------------------------\n\n\n\n"
 done
+
+cleanup
+exit 0
